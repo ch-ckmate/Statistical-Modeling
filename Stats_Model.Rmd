@@ -1,0 +1,378 @@
+---
+title: "Statistical Modeling"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 5
+  prettydoc::html_pretty:
+    df_print: paged
+    highlight: vignette
+    theme: architect
+    toc: yes
+    toc_depth: 5
+  ioslides_presentation:
+    css:
+    - css/fonts.css
+    - css/custom.css
+    - css/title-slide.css
+    - css/slide-background.css
+    includes:
+      before_body: html/title.html
+    toc: yes
+    transition: default
+    widescreen: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '5'
+  word_document:
+    toc: yes
+    toc_depth: '5'
+  slidy_presentation:
+    highlight: default
+  beamer_presentation:
+    colortheme: lily
+    fig_caption: no
+    fig_height: 6
+    fig_width: 7
+    fonttheme: structurebold
+    theme: Hannover
+    toc: yes
+course: Statistical Modeling
+---
+
+
+```{r setup, include=FALSE}
+# Use 'verbatim = TRUE' as chunk option to show chunk code as is
+require(knitr)
+hook_source_def = knit_hooks$get('source')
+knit_hooks$set(source = function(x, options){
+  if (!is.null(options$verbatim) && options$verbatim){
+    opts = gsub(",\\s*verbatim\\s*=\\s*TRUE\\s*", "", options$params.src)
+    bef = sprintf('\n\n    ```{r %s}\n', opts, "\n")
+    stringr::str_c(bef, paste(knitr:::indent_block(x, "    "), collapse = '\n'), "\n    ```\n")
+  } else {
+     hook_source_def(x, options)
+  }
+})
+```
+
+
+# Preparazione
+
+```{r, message=FALSE, warning=FALSE}
+library(systemfit)
+library(het.test)
+library(olsrr)
+library(normtest)
+library(Hmisc)
+library(car)
+library(lmtest) 
+library(sjstats) 
+library(plotrix) 
+library(sjPlot) 
+library(sjmisc) 
+library(lme4) 
+library(MASS)
+library(pbkrtest)
+library(car)
+library(sjstats)
+library(plotrix)
+library(sjPlot)
+library(sjmisc)
+library(lme4)
+library(pander)
+library(ppcor)
+library(snakecase)
+
+
+white.test <- function(lmod,data=d){ 
+  u2 <- lmod$residuals^2 
+  y <- fitted(lmod) 
+  Ru2 <- summary(lm(u2 ~ y + I(y^2)))$r.squared 
+  LM <- nrow(data)*Ru2 
+  p.value <- 1-pchisq(LM, 2) 
+  data.frame("Test statistic"=LM,"P value"=p.value) 
+}
+
+FIND_EXTREME_OBSERVARION <- function(x,sd_factor=2){
+  which(x>mean(x)+sd_factor*sd(x) | x<mean(x)-sd_factor*sd(x))
+}
+
+d <-read.csv("dati_esame_20201906.csv",sep=';')
+
+str(d)
+
+```
+
+
+```{r}
+
+var <- c("LOCUS_OF_CONTROL","SELF_CONCEPT","READ","WRITE","SCIENCE","MOTIVATION")
+head(d[,var])
+
+d$general <- ifelse(d$PROG==1,1,0)
+d$academic <- ifelse(d$PROG==2,1,0)
+d$vocational <- ifelse(d$PROG==3,1,0)
+```
+
+# Statistiche Descrittive
+
+
+```{r}
+
+
+summary(d[,var])
+
+cor(d[,var])
+
+plot(d[,var])
+
+par(mfrow=c(2,3))
+for(i in var){
+  boxplot(d[,i],main=i,col="lightblue",ylab=i)
+}
+
+for(i in var){
+  hist(d[,i],main=i,col="lightblue",xlab=i,freq=F)
+}
+
+```
+
+
+\large Dai Box-Plot notiamo come vi siano  pochi outliers.Dagli istogrammi notiamo come probabilmente solo read non sembra avere una distribuzione di tipo normale.
+La correlazione più forte si ha tra le variabili read-science (0.69070196), read-write e self concept-science ma per il resto non sono presenti altre correlazioni forti.
+
+
+# Stima del modello lineare - 1
+
+```{r}
+
+
+mod1 <- lm(LOCUS_OF_CONTROL ~ READ + WRITE + SCIENCE + PROG, d)
+
+summary(mod1)
+
+anova(mod1)
+
+white.test(mod1) #-- White test
+
+dwtest(mod1) #-- Durbin-Whatson test
+
+
+
+ols_vif_tol(mod1)
+ols_eigen_cindex(mod1)
+
+plot(mod1,which=2)
+
+hist(resid(mod1),col='purple',freq=F,main='Studio Normalità',xlab='Residui')
+lines(density(resid(mod1)),col=2,lwd=2)
+
+ks.test(resid(mod1),"pnorm")
+
+ols_plot_cooksd_bar(mod1)
+
+
+```
+
+
+\large Abbiamo un R-Sqared molto basso nonostante tutte le variabili siano significative tranne SCIENCE ed academic.
+Il test di white con un p-value dello 0,9 ci restituisce omoschedasticità del modello con una soglia dello 0,1
+Mentre il test di durbin-whatson è compreso tra 1 e 3 con un p-value dello 0,05 ci dice che gli errori sono incorrelati
+
+I VIF sono tutti sotto la soglia di 10/20 (dipende dalle condizioni che si vuole porre), per quanto riguarda invece i CI vediamo che nessun valore supera la soglia di 30 consentita, notiamo però che la quota di varianza READ E WRITE per l'ultimo autovalore è alta rispetto alle altre variabili, Possiamo quindi affermare che il modello in questione non è affetta da multicollinearità.
+
+Inoltre dal Q-Q Plot notiamo come ci siano code poco pesanti, probabilmente influenzate dagli outliers, e l'istogramma nello studio della normalità ci conferma la normalità
+
+
+```{r}
+
+
+par(mfrow = c(2,2))
+
+plot(resid(mod1) ~ fitted(mod1), pch = 15, cex = 0.8, xlab = "predicted", ylab = "residuals") # in un modello dove c'è omoschedasticità i residui si dovrebbero distribuire in modo uniforme attorno allo 0
+abline(h = 0, lty = 5, col = "red")
+
+plot(d$LOCUS_OF_CONTROL ~ fitted(mod1), pch = 15, cex = 0.8, xlab = "predicted", ylab = "joyread")
+abline(h = 0, lty = 5, col = "red")
+
+plot(rstudent(mod1) ~ fitted(mod1), pch = 15, cex = 0.8, xlab = "predicted", ylab = "student - residuals")
+abline(h = 0, lty = 5, col = "red")
+
+plot(rstudent(mod1) ~ hatvalues(mod1), pch = 15, cex = 0.8, xlab = "leverage", ylab = "student - residuals") ## vediamo che ci sono punti di leva
+abline(h = 0, lty = 5, col = "red")
+
+```
+\large Questi grafici confermano la nostra supposizione di omoschedasticità dato che i residui si distribuiscono in nuvole di punti,
+
+```{r}
+
+
+d[which(cooks.distance(mod1) > 2*4/nrow(d)),]
+d1 <- d[-which(cooks.distance(mod1) > 2*4/nrow(d)),]
+
+mod1noout <- lm(LOCUS_OF_CONTROL ~ READ + WRITE + SCIENCE + PROG, d1)
+
+summary(mod1noout)
+
+anova(mod1noout)
+
+white.test(mod1noout) #-- White test
+
+dwtest(mod1noout) #-- Durbin-Whatson test
+
+
+
+ols_vif_tol(mod1noout)
+ols_eigen_cindex(mod1noout)
+
+plot(mod1noout,which=2)
+
+hist(resid(mod1noout),col="lightblue",freq=F,xlab="Resid",main="")
+
+ks.test(resid(mod1noout),"pnorm")
+
+ols_plot_cooksd_bar(mod1noout)
+
+
+
+```
+
+\large Il dataset contiene alcuni outliers, togliendoli il modello migliora anche se non di molto. Come notiamo dalla distanza di cook ci sarebbero altri valori da rimuovere tuttavia sono molti "vicini" tra di loro quindi togliendoli potremmo rimuovere valori importanti.
+
+
+# Stima del modello lineare - 2
+
+
+```{r}
+
+
+mod2 <- lm(SELF_CONCEPT ~ READ + WRITE + SCIENCE + PROG, d1)
+
+summary(mod2)
+
+anova(mod2)
+
+white.test(mod2) #-- White test
+
+dwtest(mod2) #-- Durbin-Whatson test
+
+
+
+ols_vif_tol(mod2)
+ols_eigen_cindex(mod2)
+
+plot(mod2,which=2)
+
+hist(resid(mod2),col='purple',freq=F,main='Studio Normalità',xlab='Residui')
+lines(density(resid(mod2)),col=2,lwd=2)
+
+ks.test(resid(mod2),"pnorm")
+
+
+
+```
+\large Questo modello ci restituisce un r squared ancora più basso del precedente, dove le variabili significative sono solo general ed academic, il test di durbin-watson ci restituisce sempre incorrelazione ed il white test ci restituisce sempre omoschedasaticità vi è inoltre sempre normalità
+
+# Stima del modello lineare - 3
+
+
+```{r}
+
+
+mod3 <- lm(MOTIVATION ~ READ + WRITE + SCIENCE + PROG, d1)
+
+summary(mod3)
+
+anova(mod3)
+
+white.test(mod3) #-- White test
+
+dwtest(mod3) #-- Durbin-Whatson test
+
+
+
+ols_vif_tol(mod3)
+ols_eigen_cindex(mod3)
+
+plot(mod3,which=2)
+
+hist(resid(mod3),col='purple',freq=F,main='Studio Normalità',xlab='Residui')
+lines(density(resid(mod3)),col=2,lwd=2)
+
+ks.test(resid(mod3),"pnorm")
+
+
+
+```
+\large Anche questo modello restituisce un r quadro inferiore al primo senza outliers, osserviamo sempre incorrelazione ed omoschedasticità, In questo modello perde significatività la variabile read 
+
+# Modello di regressione Multivariato 
+
+```{r}
+
+mod4 <- lm(cbind(LOCUS_OF_CONTROL, SELF_CONCEPT, MOTIVATION) ~ READ + WRITE + SCIENCE + PROG, d1)
+
+
+summary(mod4)
+
+pander(manova(mod4),big.mark=",")
+
+Anova(mod4, type="III")
+
+```
+\large Il modello multivariato con le stesse variabili esplicative sotto il profilo descrittivo è l’accostamento di due regressioni multiple che vengono risolte l’una indipendentemente dall’ altra perciò gli R2 e le stime dei parametri usando il test sono identici.
+
+\large Se consideriamo l'analisi della Anova di terzo tipo vediamo che le cose cambiano: tutte le variabili sono significative ma con livelli differenti: PROG e WRITE al livello 0.01, READ è più significativa di SCIENCE ma meno di PROG/WRITE, considerando un livello alpha = 0.05
+
+# Il coefficiente per la variabile write nell’equazione relativa a locus_of_control come outcome è uguale a quello nell’equazione che ha come outcome self_concept 
+
+```{r}
+
+e1<- LOCUS_OF_CONTROL ~ READ + WRITE + SCIENCE
+
+e2<- SELF_CONCEPT ~ READ + WRITE + SCIENCE
+
+sistema <- list(e1=e1,e2=e2)
+mod_ALL <- systemfit(sistema,"SUR",data=d1)
+
+
+linearHypothesis(mod_ALL,"e1_WRITE = e2_WRITE",test="FT")
+
+```
+\large Viene respinta l'ipotesi di uguaglianza a significatività 0.05
+
+
+# Il coefficiente per il prog=1 è uguale al coefficiente per il prog=2 
+```{r}
+
+e1<- LOCUS_OF_CONTROL ~ READ + WRITE + SCIENCE + general
+
+e2<- SELF_CONCEPT ~ READ + WRITE + SCIENCE + academic
+
+sistema <- list(e1=e1,e2=e2)
+mod_ALL <- systemfit(sistema,"SUR",data=d1)
+
+
+linearHypothesis(mod_ALL,"e1_general + e2_academic",test="FT")
+```
+\large Non viene respinta l'ipotesi di uguaglianza a significatività 0.1
+
+
+# Il coefficiente di Write sia uguale a 0.05 
+
+```{r}
+
+e1<- LOCUS_OF_CONTROL ~ READ + WRITE + SCIENCE + PROG
+
+e2<- MOTIVATION ~ READ + WRITE + SCIENCE + PROG
+
+sistema <- list(e1=e1,e2=e2)
+mod_ALL <- systemfit(sistema,"SUR",data=d1)
+
+
+linearHypothesis(mod_ALL,"e1_WRITE = 0.05",test="FT")
+linearHypothesis(mod_ALL,"e2_WRITE = 0.05",test="FT")
+```
+\large Viene respinta per entrambe l'ipotesi di uguaglianza a 0.05 con significatività 0.05
