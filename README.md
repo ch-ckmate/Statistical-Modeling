@@ -1,4 +1,4 @@
 # Statistical-Modeling
 
-Modello lineare OLS
+Modello lineare OLS /n
 Modello multivariato e SURE
